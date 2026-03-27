@@ -1,0 +1,6 @@
+#ifndef STACJA_POGODOWA_LIBRARY_H
+#define STACJA_POGODOWA_LIBRARY_H
+
+void hello(void);
+
+#endif // STACJA_POGODOWA_LIBRARY_H
