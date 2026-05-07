@@ -22,13 +22,12 @@
 #include "math.h"
 
 #include "flash.h"
-#include "ff.h"
-#include "ffconf.h"
-#include "diskio.h"
+
 #include "light.h"
 #include "oled.h"
 #include "temp.h"
 //#include "acc.h"
+#include "ff.h"
 
 #define HTU21D_I2C_ADDRESS (0x40<<1)
 #define CMD_TRIG_HUMD_NOHOLD 0xF5
@@ -36,10 +35,10 @@
 #define BMP180_ADDRESS (0x77<<1)
 #define OSS 3
 
-#define SD_CARD 0
-
 static uint32_t msTicks = 0;
-static uint8_t buf[10];
+static uint8_t buf[20];
+
+
 
 static void intToString(int value, uint8_t* pBuf, uint32_t len, uint32_t base)
 {
@@ -94,11 +93,6 @@ static void intToString(int value, uint8_t* pBuf, uint32_t len, uint32_t base)
 
 }
 
-void SysTick_Handler(void) {
-    msTicks++;
-    disk_timerproc();
-}
-
 static uint32_t getTicks(void)
 {
     return msTicks;
@@ -108,8 +102,9 @@ uint32_t read_humidity(void) {
 	uint8_t cmd = CMD_TRIG_HUMD_NOHOLD;
 	uint8_t rx_data[2] = {0};
 
+
 	I2CWrite(HTU21D_I2C_ADDRESS, &cmd, 1);
-	delay32Ms(0, 25);
+	delay32Ms(0, 15);
 
 	I2CRead(HTU21D_I2C_ADDRESS, rx_data, 2);
 	uint16_t raw_humidity = (rx_data[0] << 8 | rx_data[1]);
@@ -142,6 +137,7 @@ void bmp180_read_calibration(void)
     uint8_t b[22];
 
     I2CWrite(BMP180_ADDRESS, &reg, 1);
+    delay32Ms(0, 5);
     I2CRead(BMP180_ADDRESS, b, 22);
 
     cal.AC1 = (b[0]<<8) | b[1];
@@ -164,6 +160,7 @@ uint32_t bmp180_read_ut(void)
     uint8_t data[2];
 
     I2CWrite(BMP180_ADDRESS, cmd, 2);
+    //I2CStop();
     delay32Ms(0, 5);
 
     uint8_t reg = 0xF6;
@@ -183,6 +180,7 @@ uint32_t bmp180_read_up(void)
     cmd[1] = 0x34 + (OSS<<6);
 
     I2CWrite(BMP180_ADDRESS, cmd, 2);
+    //I2CStop();
 
     switch(OSS)
     {
@@ -249,20 +247,15 @@ int32_t bmp180_read_pressure_pa(void)
     return bmp180_get_pressure_pa_fixed(ut, up);
 }
 
-FATFS fs;
-FIL file;
-UINT bw;
-FRESULT res;
 
-DWORD get_fattime(void)
-{
-    return ((DWORD)(2024 - 1980) << 25)
-         | ((DWORD)1 << 21)
-         | ((DWORD)1 << 16);
+void SysTick_Handler(void) {
+    msTicks++;
 }
+
 
 int main (void)
 {
+	int32_t ticks = 0;
 
     int32_t t = 0;
     int32_t tempK = 0;
@@ -278,6 +271,11 @@ int main (void)
 
     I2CInit( (uint32_t)I2CMASTER, 0 );
     SSPInit();
+    GPIOSetDir(PORT0, 2, 1);
+    GPIOSetValue(PORT0, 2, 1);
+
+    //delay32Ms(0, 10);
+
     SysTick_Config(SystemCoreClock / 1000);
 
     ADCInit( ADC_CLK );
@@ -289,34 +287,8 @@ int main (void)
 
     bmp180_read_calibration();
 
-    DSTATUS sd_status = disk_initialize(0);
-
-    if (sd_status & STA_NOINIT) {
-    	UARTSendString((uint8_t*) "SD init FAILED\r\n");
-    }
-    else {
-    	UARTSendString((uint8_t*) "SD init OK\r\n");
-    }
-
-    if (f_mount(0, &fs) == FR_OK) {
-    	UARTSendString((uint8_t*) "FAT mount OK\r\n");
-    }
-    else {
-    	UARTSendString((uint8_t*) "FAT mount FAILED\r\n");
-    }
-
-    if (f_open(&file, "log.txt", FA_CREATE_ALWAYS | FA_WRITE) == FR_OK) {
-          f_write(&file, "Start log\r\n", 11, &bw);
-          f_close(&file);
-      }
-    else {
-    	UARTSendString((uint8_t*) "f_open FAILED\r\n");
-    }
-
-    res = f_open(&file, "log.txt", FA_OPEN_ALWAYS | FA_WRITE);
-
     /* setup sys Tick. Elapsed time is e.g. needed by temperature sensor */
-
+    SysTick_Config(SystemCoreClock / 1000);
     if ( !(SysTick->CTRL & (1<<SysTick_CTRL_CLKSOURCE_Msk)) )
     {
       /* When external reference clock is used(CLKSOURCE in
@@ -377,27 +349,8 @@ int main (void)
         sprintf(buf, "%d.%d", pressure/100, pressure%100);
         oled_putString((1 + 9*6), 40, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
-        if (res == FR_OK)
-        {
-            f_lseek(&file, file.fsize);
-
-            char logbuf[64];
-
-            sprintf(logbuf,
-                    "T=%d.%dC H=%d.%d%% L=%d\r\n",
-                    t / 10, t % 10,
-                    humidity / 10, humidity % 10,
-                    light);
-
-            UINT bw;
-            res = f_write(&file, logbuf, strlen(logbuf), &bw);
-
-            f_sync(&file);
-        }
-
         /* delay */
-        delay32Ms(0, 25);
+        delay32Ms(0, 15);
     }
 
-    f_close(&file);
 }
