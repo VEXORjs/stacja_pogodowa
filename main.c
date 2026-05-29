@@ -30,8 +30,11 @@
 #include "ff.h"
 #include "hmc5883l_raw.h"
 
+#include "sensirion_voc_algorithm.h"
+
 #define HTU21D_I2C_ADDRESS (0x40<<1)
-#define CMD_TRIG_HUMD_NOHOLD 0xF5
+//#define CMD_TRIG_HUMD_NOHOLD 0xF5
+#define CMD_TRIG_HUMD_HOLD 0xE5
 
 #define BMP180_ADDRESS (0x77<<1)
 #define OSS 3
@@ -39,7 +42,7 @@
 #define SGP40_CMD_MSB 0x26
 #define SGP40_CMD_LSB 0x0F
 
-#define HMC_ADDR (0x1E << 1)
+#define HMC_ADDR (0x0D << 1)
 
 static uint32_t msTicks = 0;
 static uint8_t buf[20];
@@ -152,20 +155,26 @@ static uint32_t getTicks(void)
     return msTicks;
 }
 
-uint32_t read_humidity(void) {
-	uint8_t cmd = CMD_TRIG_HUMD_NOHOLD;
+int32_t read_humidity(void) {
+	uint8_t cmd = CMD_TRIG_HUMD_HOLD;
 	uint8_t rx_data[2] = {0};
 
 
 	I2CWrite(HTU21D_I2C_ADDRESS, &cmd, 1);
-	delay32Ms(0, 15);
+	delay32Ms(0, 50);
 
-	I2CRead(HTU21D_I2C_ADDRESS, rx_data, 2);
+	I2CRead(HTU21D_I2C_ADDRESS, rx_data, 3);
 	uint16_t raw_humidity = (rx_data[0] << 8 | rx_data[1]);
 	raw_humidity &= 0xFFFC;
 	int32_t humidity_x10 = -60 + (1250 * (int32_t)raw_humidity / 65536);
 
+//	sprintf(buf, "%02X %02X", rx_data[0], rx_data[1]);
+//		oled_putString((1 + 9*6), 50, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+
 	return humidity_x10;
+
+
 }
 
 typedef struct {
@@ -418,6 +427,9 @@ int main (void)
     int16_t x_gauss, y_gauss, z_gauss;
     int32_t b_raw;
     int32_t b;
+    VocAlgorithmParams voc_params;
+
+    VocAlgorithm_init(&voc_params);
 
     GPIOInit();
 
@@ -429,7 +441,18 @@ int main (void)
     GPIOSetDir(PORT0, 2, 1);
     GPIOSetValue(PORT0, 2, 1);
 
-    //delay32Ms(0, 10);
+
+//    uint8_t cmd = 0xE7;
+//    uint8_t val = 0;
+//
+//    I2CWrite(0x80, &cmd, 1);
+//
+//    delay32Ms(0, 80);
+//
+//    I2CRead(0x80, &val, 3);
+
+
+	//delay32Ms(0, 10);
 
     SysTick_Config(SystemCoreClock / 1000);
 
@@ -475,23 +498,25 @@ int main (void)
     oled_clearScreen(OLED_COLOR_BLACK);
 
     oled_putString(1,1,  (uint8_t*)"Temp(C): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-    oled_putString(1,10,  (uint8_t*)"Raw VOC: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+    oled_putString(1,10,  (uint8_t*)"VOC: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
     oled_putString(1,20,  (uint8_t*)"Humi(%): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
     oled_putString(1,30, (uint8_t*)"Lux(lx): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-    oled_putString(1,40, (uint8_t*)"Press: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+    oled_putString(1,40, (uint8_t*)"Pre(hPa): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+    oled_putString(1,50, (uint8_t*)"Gauss: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
     uint8_t alarm_played = 0;
 
     while(1) {
-    	UARTSendString((uint8_t*)"ping\r\n");
-    	delay32Ms(0, 1000);
     	/* Light sensor*/
     	light = light_read();
 
         /* Temperature */
         t = temp_read();
 
+        /* air quality*/
         raw_air_quality = read_airquality_raw();
+        int32_t voc_index = 0;
+        VocAlgorithm_process(&voc_params, raw_air_quality, &voc_index);
 
         /* Humidity */
         humidity = read_humidity();
@@ -500,12 +525,16 @@ int main (void)
         pressure = bmp180_read_pressure_pa();
 
         HMC_ReadXYZ(mag);
+        delay32Ms(0, 20);
 
         int32_t mx = mag[0];
         int32_t my = mag[1];
         int32_t mz = mag[2];
 
-        b_raw = (int32_t)sqrt((double)(mx*mx + my*my + mz*mz));
+
+//        b_raw = (int32_t)sqrt((mx*mx + my*my + mz*mz));
+//        b = (b_raw * 1000) / 1090;
+        b_raw = (int32_t)sqrt((mx*mx + my*my + mz*mz));
         b = (b_raw * 1000) / 1090;
 
         /* output values to OLED display */
@@ -518,18 +547,18 @@ int main (void)
 //        sprintf(buf, "%d %d %d", mag[0], mag[1], mag[2]);
 //        oled_putString(10, 10, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
-        sprintf(buf,"%d", raw_air_quality);
+        sprintf(buf,"%d", voc_index);
         oled_putString((1 + 9*6), 10, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
         sprintf(buf, "%d.%d%%", humidity/10, humidity%10);
         oled_putString((1 + 9*6), 20, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
-        if (light < 200 && !alarm_played) {
-        	alarm_played = 1;
-        	playImperialMarch();
-        } else {
-        	alarm_played = 0;
-        }
+//        if (light < 200 && !alarm_played) {
+//        	alarm_played = 1;
+//        	playImperialMarch();
+//        } else {
+//        	alarm_played = 0;
+//        }
 
         sprintf(buf, "%d", light);
         oled_putString((1 + 9*6), 30, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
@@ -537,8 +566,11 @@ int main (void)
         sprintf(buf, "%d.%d", pressure/100, pressure%100);
         oled_putString((1 + 9*6), 40, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
-        sprintf(buf, "%d.%03d", b/1000, b%1000);
+        sprintf(buf, "%d.%03d", b/10000, b%10000);
         oled_putString((1 + 9*6), 50, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+//        sprintf(buf, "USER REG: %02X\r\n", val);
+//    	oled_putString((1 + 9*1), 50, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
         /* delay */
         delay32Ms(0, 15);
