@@ -60,6 +60,19 @@ static uint8_t buf[20];
 #define IM_AB3 3795   // Ab3 263Hz
 #define IM_REST 0
 
+typedef enum {
+    SCREEN_MAIN = 0,
+    SCREEN_TEMP_PRESSURE,
+    SCREEN_AIR,
+    SCREEN_MAGNETIC,
+    SCREEN_COUNT
+} Screen_t;
+
+static Screen_t current_screen = SCREEN_MAIN;
+static uint32_t last_sw3_tick  = 0;
+static uint32_t last_sw4_tick  = 0;
+#define DEBOUNCE_MS 10
+
 typedef struct {
     uint32_t freq;   // okres µs
     uint32_t dur;    // czas ms
@@ -320,7 +333,6 @@ static void playNote(uint32_t note, uint32_t durationMs) {
     	SysTick->CTRL &= ~SysTick_CTRL_ENABLE_Msk;
         while (t < (durationMs * 1000)) {
             P1_2_HIGH();
-            // prosta pętla zamiast delay32Us
             volatile uint32_t i;
             for(i = 0; i < note/4; i++) __NOP();
 
@@ -353,53 +365,108 @@ uint16_t read_airquality_raw(){
 	return ((uint16_t)buf[0] << 8) | buf[1];
 }
 
+/* rendering screens */
+void draw_main_screen() {
+	oled_clearScreen(OLED_COLOR_BLACK);
+	oled_putString(1,1, (uint8_t*) "Stacja Pogodowa", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+	oled_putString(1,11, (uint8_t*) "Jakub Sliwa", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+	oled_putString(1,21, (uint8_t*) "Kacper Adamczyk", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+	oled_putString(1,31, (uint8_t*) "Jakub Malinowski", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
+	oled_putString(1,51, (uint8_t*) "<--", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+//	oled_putString(69, 51, (uint8_t*)"-->", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+}
 
-//static void init_pwm(void)
-//{
-//  LPC_PWM1->MR0 = 1000; // okres pwm
-//  LPC_PWM1->LER |= (1U << 0U); // zatwierdzenie MR0
-//  // rejestry MR są 32-bitowe
-//
-//  // bit 0 - wlaczenie glownego licznika i prescalera
-//  // bit 3 - pwm enable
-//  LPC_PWM1->TCR |= (1U << 0U) | (1U << 3U);
-//
-//  PINSEL_CFG_Type PinCfg;
-//  PinCfg.Portnum = 2;
-//  PinCfg.Pinmode = 0;
-//  PinCfg.Funcnum = 1;
-//  PinCfg.OpenDrain = 0;
-//
-//  // PIO1_9
-//  PinCfg.Pinnum = 0;
-//  PINSEL_ConfigPin(&PinCfg);
-//  LPC_PWM1->MR1 = 500; // 50%
-//  LPC_PWM1->LER |= (1U << 1U); // zatwierdzenie rejestru MR1
-//  LPC_PWM1->PCR |= (1U << (9U + 0U)); // aktywacja wyjscia sygnalu dla kanalu 2
-//
-//  // PIO2_3
-//  PinCfg.Pinnum = 3;
-//  PINSEL_ConfigPin(&PinCfg);
-//  LPC_PWM1->MR4 = 500; // 50%
-//  LPC_PWM1->LER |= (1U << 4U); // zatwierdzenie MR4
-//  LPC_PWM1->PCR |= (1U << (9U + 3U));
-//}
-//
-//static void my_set_pwm_value(int channel, int value)
-//{
-//  if (channel == 1)
-//  {
-//    LPC_PWM1->MR1 = value;
-//    LPC_PWM1->LER |= (1U << 1U);
-//  }
-//  else if (channel == 2)
-//  {
-//    LPC_PWM1->MR4 = value;
-//    LPC_PWM1->LER |= (1U << 4U);
-//  }
-//}
-//
+void draw_temp_pressure_screen(int32_t temp, int32_t pressure, int32_t lux) {
+	oled_clearScreen(OLED_COLOR_BLACK);
+
+	oled_putString(1,1,  (uint8_t*)"Pomiary glowne: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+	oled_putString(1,21, (uint8_t*)"Temp(C): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+	oled_putString(1,31, (uint8_t*)"Pre(hPa): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+	oled_putString(1,41, (uint8_t*)"Lux(lx): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+	sprintf(buf,"%2d.%dC",temp/10, temp%10 );
+	oled_putString((1+9*6),21, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+	sprintf(buf, "%d.%d", pressure/100, pressure%100);
+	oled_putString((1 + 9*6), 31, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+	sprintf(buf, "%d", lux);
+	oled_putString((1 + 9*6), 41, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+	oled_putString(1,51, (uint8_t*) "<--", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+//	oled_putString(69, 51, (uint8_t*)"-->", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+}
+
+void draw_air_screen(int32_t voc, int32_t humidity) {
+	//oled_clearScreen(OLED_COLOR_BLACK);
+
+	oled_putString(1,1,  (uint8_t*)"Powietrze ===", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+	oled_putString(1,21,  (uint8_t*)"VOC: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+	oled_putString(1,31,  (uint8_t*)"Humi(%): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+	sprintf(buf,"%d", voc);
+	oled_putString((1 + 9*6), 21, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+	sprintf(buf, "%d.%d%%", humidity/10, humidity%10);
+	oled_putString((1 + 9*6), 31, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+	oled_putString(1,51, (uint8_t*) "<--", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+//	oled_putString(69, 51, (uint8_t*)"-->", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+}
+
+void draw_magnetic_screen(int32_t b) {
+    oled_clearScreen(OLED_COLOR_BLACK);
+
+    oled_putString(1,1,  (uint8_t*)"=== Magnetometr ===", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+    oled_putString(1, 21, (uint8_t*)"Gauss: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+    sprintf(buf, "%d.%04d", b/10000, b%10000);
+    oled_putString((1 + 9*6), 21, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+
+    oled_putString(1,  51, (uint8_t*)"<--", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+//    oled_putString(69, 51, (uint8_t*)"-->", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+}
+
+static void redraw_current_screen(int32_t t, int32_t humidity, int32_t light,
+                                   int32_t pressure, int32_t voc, int32_t b,
+                                   uint8_t full_redraw) {
+    if (full_redraw) {
+        switch (current_screen) {
+            case SCREEN_MAIN:          draw_main_screen();                        break;
+            case SCREEN_TEMP_PRESSURE: draw_temp_pressure_screen(t, pressure, light); break;
+            case SCREEN_AIR:           draw_air_screen(voc, humidity);            break;
+            case SCREEN_MAGNETIC:      draw_magnetic_screen(b);                   break;
+            default: break;
+        }
+    } else {
+        switch (current_screen) {
+            case SCREEN_TEMP_PRESSURE:
+                sprintf(buf, "%2d.%dC ", t/10, t%10);
+                oled_putString((1+9*6), 1, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                sprintf(buf, "%d.%d  ", pressure/100, pressure%100);
+                oled_putString((1+9*6), 11, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                sprintf(buf, "%d    ", light);
+                oled_putString((1+9*6), 21, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                break;
+            case SCREEN_AIR:
+                sprintf(buf, "%d    ", voc);
+                oled_putString((1+9*6), 1, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                sprintf(buf, "%d.%d%%  ", humidity/10, humidity%10);
+                oled_putString((1+9*6), 11, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                break;
+            case SCREEN_MAGNETIC:
+                sprintf(buf, "%d.%04d  ", b/10000, b%10000);
+                oled_putString((1+9*6), 1, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                break;
+            default: break;
+        }
+    }
+
+    sprintf(buf, "%d/%d", (int)current_screen + 1, (int)SCREEN_COUNT);
+    oled_putString(100, 1, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+}
 
 int main (void)
 {
@@ -432,27 +499,21 @@ int main (void)
     VocAlgorithm_init(&voc_params);
 
     GPIOInit();
-
+/*
     UARTInit(115200);
     UARTSendString((uint8_t*)"OLED - Peripherals\r\n");
-
+*/
     I2CInit( (uint32_t)I2CMASTER, 0 );
     SSPInit();
     GPIOSetDir(PORT0, 2, 1);
     GPIOSetValue(PORT0, 2, 1);
+    LPC_IOCON->PIO0_1 &= ~0x7;
+    GPIOSetDir(PORT0, 1, 0);
 
+    LPC_IOCON->PIO1_4 &= ~0x7;  // Wyczyść bity funkcji alternatywnej
+    LPC_IOCON->PIO1_4 |= 0x01;  // Ustaw jako GPIO (funkcja 001)
+    GPIOSetDir(PORT1, 4, 0);    // Ustaw jako wejście
 
-//    uint8_t cmd = 0xE7;
-//    uint8_t val = 0;
-//
-//    I2CWrite(0x80, &cmd, 1);
-//
-//    delay32Ms(0, 80);
-//
-//    I2CRead(0x80, &val, 3);
-
-
-	//delay32Ms(0, 10);
 
     SysTick_Config(SystemCoreClock / 1000);
 
@@ -460,14 +521,9 @@ int main (void)
 
     oled_init();
     light_init();
-    acc_init();
     temp_init (&getTicks);
 
     bmp180_read_calibration();
-
-//    init_pwm();
-//
-//    my_set_pwm_value(1, 500);
 
     HMC_Init();
     delay32Ms(0, 10);
@@ -497,13 +553,6 @@ int main (void)
 
     oled_clearScreen(OLED_COLOR_BLACK);
 
-    oled_putString(1,1,  (uint8_t*)"Temp(C): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-    oled_putString(1,10,  (uint8_t*)"VOC: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-    oled_putString(1,20,  (uint8_t*)"Humi(%): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-    oled_putString(1,30, (uint8_t*)"Lux(lx): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-    oled_putString(1,40, (uint8_t*)"Pre(hPa): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-    oled_putString(1,50, (uint8_t*)"Gauss: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-
     uint8_t alarm_played = 0;
 
     while(1) {
@@ -531,46 +580,51 @@ int main (void)
         int32_t my = mag[1];
         int32_t mz = mag[2];
 
-
-//        b_raw = (int32_t)sqrt((mx*mx + my*my + mz*mz));
-//        b = (b_raw * 1000) / 1090;
         b_raw = (int32_t)sqrt((mx*mx + my*my + mz*mz));
         b = (b_raw * 1000) / 1090;
 
-        /* output values to OLED display */
-        sprintf(buf,"%2d.%dC",t/10, t%10 );
-        oled_putString((1+9*6),1, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+        if (light < 200 && !alarm_played) {
+        	alarm_played = 1;
+        	playImperialMarch();
+        } else {
+        	alarm_played = 0;
+        }
 
-        tempK = (t/10) + 273;
-        //sprintf(buf,"%3dK", tempK);
-        //oled_putString((1 + 9*6), 10, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-//        sprintf(buf, "%d %d %d", mag[0], mag[1], mag[2]);
-//        oled_putString(10, 10, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+        static uint8_t sw3_prev = 1;
+//        static uint8_t sw4_prev = 1;
+        static uint32_t sw3_last_change = 0;
+//        static uint32_t sw4_last_change = 0;
 
-        sprintf(buf,"%d", voc_index);
-        oled_putString((1 + 9*6), 10, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+        uint8_t sw3_now = GPIOGetValue(PORT0, 1);
+//        uint8_t sw4_now = GPIOGetValue(PORT1, 4);
 
-        sprintf(buf, "%d.%d%%", humidity/10, humidity%10);
-        oled_putString((1 + 9*6), 20, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+        uint8_t nav_changed = 0;
 
-//        if (light < 200 && !alarm_played) {
-//        	alarm_played = 1;
-//        	playImperialMarch();
-//        } else {
-//        	alarm_played = 0;
+        if (sw3_prev == 1 && sw3_now == 0) {
+            if ((msTicks - sw3_last_change) > DEBOUNCE_MS) {
+                sw3_last_change = msTicks;
+                current_screen = (current_screen == 0)
+                                 ? (SCREEN_COUNT - 1)
+                                 : (current_screen - 1);
+                nav_changed = 1;
+            }
+        }
+//        if (sw4_prev == 1 && sw4_now == 0) {
+//            if ((msTicks - sw4_last_change) > DEBOUNCE_MS) {
+//                sw4_last_change = msTicks;
+//                current_screen = (current_screen + 1) % SCREEN_COUNT;
+//                nav_changed = 1;
+//            }
 //        }
 
-        sprintf(buf, "%d", light);
-        oled_putString((1 + 9*6), 30, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+        sw3_prev = sw3_now;
+//        sw4_prev = sw4_now;
 
-        sprintf(buf, "%d.%d", pressure/100, pressure%100);
-        oled_putString((1 + 9*6), 40, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-
-        sprintf(buf, "%d.%03d", b/10000, b%10000);
-        oled_putString((1 + 9*6), 50, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-
-//        sprintf(buf, "USER REG: %02X\r\n", val);
-//    	oled_putString((1 + 9*1), 50, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+        static uint8_t refresh_cnt = 0;
+        if (nav_changed || (++refresh_cnt >= 1)) {
+            refresh_cnt = 0;
+            redraw_current_screen(t, humidity, light, pressure, voc_index, b, nav_changed);
+        }
 
         /* delay */
         delay32Ms(0, 15);
