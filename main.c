@@ -168,10 +168,14 @@ static uint32_t getTicks(void)
     return msTicks;
 }
 
+/*!
+ *	@brief Reads raw data from a HTU21D module.
+ *	@returns Raw value of air humidity multiplied by 10.
+*/
+
 int32_t read_humidity(void) {
 	uint8_t cmd = CMD_TRIG_HUMD_HOLD;
 	uint8_t rx_data[2] = {0};
-
 
 	I2CWrite(HTU21D_I2C_ADDRESS, &cmd, 1);
 	delay32Ms(0, 50);
@@ -186,8 +190,6 @@ int32_t read_humidity(void) {
 
 
 	return humidity_x10;
-
-
 }
 
 typedef struct {
@@ -327,6 +329,15 @@ void SysTick_Handler(void) {
     msTicks++;
 }
 
+/*!
+ *	@brief This method plays the note using the built-in amplifier.
+ *
+ *	@param note
+ *			Note frequency that is to be played.
+ *
+ *	@param durationMs
+ *			Duration in milliseconds for how long the note will be played.
+*/
 static void playNote(uint32_t note, uint32_t durationMs) {
     uint32_t t = 0;
     if (note > 0) {
@@ -347,6 +358,9 @@ static void playNote(uint32_t note, uint32_t durationMs) {
     }
 }
 
+/*!
+ * 	@brief Function that iterates through the nodes representing designated sound to be played and calling playNote method.
+*/
 static void playImperialMarch(void) {
     uint32_t count = sizeof(imperial) / sizeof(ImNote);
     for (uint32_t i = 0; i < count; i++) {
@@ -354,6 +368,16 @@ static void playImperialMarch(void) {
     }
 }
 
+/*!
+ * 	@brief Function that sends a 5 byte command to the SGP40 module containing 2 byte of command to read a module reading,
+ * 			two parameters 0x80 and 0x00 that is reliable for relative humidity compensation and 0xA2 which is a control sum.
+ * 			Starts a 32 milliseconds delay in order to read a raw value. Finally reads 3 bytes of reading where first 2 bytes are
+ * 			MSB and LSB of the reading and the third byte is a control sum sent by a module.
+ *
+ * 	@returns Function returns a raw value of air VOC by shifting first element in the buffer by 8 bits and performs an OR operation
+ * 			 with a second element in the buffer.
+ *
+*/
 uint16_t read_airquality_raw(){
 	uint8_t cmd[5] = {SGP40_CMD_MSB, SGP40_CMD_LSB, 0x80, 0x00, 0xA2};
 	uint8_t buf[3];
@@ -378,7 +402,7 @@ void draw_main_screen() {
 }
 
 void draw_temp_pressure_screen(int32_t temp, int32_t pressure, int32_t lux) {
-	oled_clearScreen(OLED_COLOR_BLACK);
+	//oled_clearScreen(OLED_COLOR_BLACK);
 
 	oled_putString(1,1,  (uint8_t*)"Pomiary glowne: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
@@ -417,7 +441,7 @@ void draw_air_screen(int32_t voc, int32_t humidity) {
 }
 
 void draw_magnetic_screen(int32_t b) {
-    oled_clearScreen(OLED_COLOR_BLACK);
+    //oled_clearScreen(OLED_COLOR_BLACK);
 
     oled_putString(1,1,  (uint8_t*)"=== Magnetometr ===", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
     oled_putString(1, 21, (uint8_t*)"Gauss: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
@@ -433,32 +457,35 @@ static void redraw_current_screen(int32_t t, int32_t humidity, int32_t light,
                                    int32_t pressure, int32_t voc, int32_t b,
                                    uint8_t full_redraw) {
     if (full_redraw) {
+        oled_clearScreen(OLED_COLOR_BLACK);   // ← ZAWSZE czyść przy zmianie ekranu
         switch (current_screen) {
-            case SCREEN_MAIN:          draw_main_screen();                        break;
+            case SCREEN_MAIN:          draw_main_screen();                            break;
             case SCREEN_TEMP_PRESSURE: draw_temp_pressure_screen(t, pressure, light); break;
-            case SCREEN_AIR:           draw_air_screen(voc, humidity);            break;
-            case SCREEN_MAGNETIC:      draw_magnetic_screen(b);                   break;
+            case SCREEN_AIR:           draw_air_screen(voc, humidity);                break;
+            case SCREEN_MAGNETIC:      draw_magnetic_screen(b);                       break;
             default: break;
         }
     } else {
         switch (current_screen) {
             case SCREEN_TEMP_PRESSURE:
-                sprintf(buf, "%2d.%dC ", t/10, t%10);
-                oled_putString((1+9*6), 1, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-                sprintf(buf, "%d.%d  ", pressure/100, pressure%100);
-                oled_putString((1+9*6), 11, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-                sprintf(buf, "%d    ", light);
+                sprintf(buf, "%2d.%dC  ", t/10, t%10);
                 oled_putString((1+9*6), 21, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                sprintf(buf, "%d.%d    ", pressure/100, pressure%100);
+                oled_putString((1+9*6), 31, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                sprintf(buf, "%d      ", light);
+                oled_putString((1+9*6), 41, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
                 break;
             case SCREEN_AIR:
-                sprintf(buf, "%d    ", voc);
-                oled_putString((1+9*6), 1, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-                sprintf(buf, "%d.%d%%  ", humidity/10, humidity%10);
-                oled_putString((1+9*6), 11, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                sprintf(buf, "%d      ", voc);
+                oled_putString((1+9*6), 21, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                sprintf(buf, "%d.%d%%   ", humidity/10, humidity%10);
+                oled_putString((1+9*6), 31, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
                 break;
             case SCREEN_MAGNETIC:
                 sprintf(buf, "%d.%04d  ", b/10000, b%10000);
-                oled_putString((1+9*6), 1, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                oled_putString((1+9*6), 21, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+                break;
+            case SCREEN_MAIN:
                 break;
             default: break;
         }
@@ -591,12 +618,12 @@ int main (void)
         }
 
         static uint8_t sw3_prev = 1;
-//        static uint8_t sw4_prev = 1;
+        static uint8_t sw4_prev = 1;
         static uint32_t sw3_last_change = 0;
-//        static uint32_t sw4_last_change = 0;
+        static uint32_t sw4_last_change = 0;
 
         uint8_t sw3_now = GPIOGetValue(PORT0, 1);
-//        uint8_t sw4_now = GPIOGetValue(PORT1, 4);
+        uint8_t sw4_now = GPIOGetValue(PORT1, 4);
 
         uint8_t nav_changed = 0;
 
@@ -609,16 +636,16 @@ int main (void)
                 nav_changed = 1;
             }
         }
-//        if (sw4_prev == 1 && sw4_now == 0) {
-//            if ((msTicks - sw4_last_change) > DEBOUNCE_MS) {
-//                sw4_last_change = msTicks;
-//                current_screen = (current_screen + 1) % SCREEN_COUNT;
-//                nav_changed = 1;
-//            }
-//        }
+        if (sw4_prev == 1 && sw4_now == 0) {
+            if ((msTicks - sw4_last_change) > DEBOUNCE_MS) {
+                sw4_last_change = msTicks;
+                current_screen = (current_screen + 1) % SCREEN_COUNT;
+                nav_changed = 1;
+            }
+        }
 
         sw3_prev = sw3_now;
-//        sw4_prev = sw4_now;
+        sw4_prev = sw4_now;
 
         static uint8_t refresh_cnt = 0;
         if (nav_changed || (++refresh_cnt >= 1)) {
