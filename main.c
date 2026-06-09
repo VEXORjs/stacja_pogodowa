@@ -325,8 +325,41 @@ int32_t bmp180_read_pressure_pa(void)
     return bmp180_get_pressure_pa_fixed(ut, up);
 }
 
-void SysTick_Handler(void) {
+volatile uint8_t sek = 0;
+volatile uint8_t min = 0;
+volatile uint8_t godz = 0;
+
+uint8_t rtcString[16] = "00:00:00";
+
+void SysTick_Handler(void)
+{
+    static uint16_t ms = 0;
+
     msTicks++;
+
+    ms++;
+
+    if(ms >= 1000)
+    {
+        ms = 0;
+
+        sek++;
+
+        if(sek >= 60)
+        {
+            sek = 0;
+            min++;
+
+            if(min >= 60)
+            {
+                min = 0;
+                godz++;
+
+                if(godz >= 24)
+                    godz = 0;
+            }
+        }
+    }
 }
 
 /*!
@@ -396,6 +429,8 @@ void draw_main_screen() {
 	oled_putString(1,11, (uint8_t*) "Jakub Sliwa", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 	oled_putString(1,21, (uint8_t*) "Kacper Adamczyk", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 	oled_putString(1,31, (uint8_t*) "Jakub Malinowski", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+    oled_putString(1,41, (uint8_t*) "RTC:", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
+    oled_putString(35,41, rtcString, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
 	oled_putString(1,51, (uint8_t*) "<--", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 //	oled_putString(69, 51, (uint8_t*)"-->", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
@@ -653,6 +688,23 @@ int main (void)
             redraw_current_screen(t, humidity, light, pressure, voc_index, b, nav_changed);
         }
 
+        static uint8_t poprzednia_sek = 255;
+
+        if(sek != poprzednia_sek)
+        {
+            poprzednia_sek = sek;
+
+            sprintf((char*)rtcString,
+                    "%02d:%02d:%02d",
+                    godz, min, sek);
+
+            if(current_screen == SCREEN_MAIN)
+            {
+                oled_putString(35, 41, rtcString,
+                               OLED_COLOR_WHITE,
+                               OLED_COLOR_BLACK);
+            }
+        }
         /* delay */
         delay32Ms(0, 15);
     }
