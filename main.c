@@ -185,10 +185,6 @@ int32_t read_humidity(void) {
 	raw_humidity &= 0xFFFC;
 	int32_t humidity_x10 = -60 + (1250 * (int32_t)raw_humidity / 65536);
 
-//	sprintf(buf, "%02X %02X", rx_data[0], rx_data[1]);
-//		oled_putString((1 + 9*6), 50, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-
-
 	return humidity_x10;
 }
 
@@ -208,7 +204,9 @@ typedef struct {
 
 BMP180_calib_t cal;
 
-/* read calibration */
+/*!
+ *	@brief This method initializes compenstation coefficients for BMP180 module.
+*/
 void bmp180_read_calibration(void)
 {
     uint8_t reg = 0xAA;
@@ -231,7 +229,12 @@ void bmp180_read_calibration(void)
     cal.MD  = (b[20]<<8) | b[21];
 }
 
-/* UT */
+/*!
+ *	@brief This method send a two byte command buffer 0xF4 0x2E to 7-bit BMP180 address 0x77 in order to read temperature. Delays operation by 5 milliseconds.
+ *			Then reads 2 byte response MSB and LSB from a module. Converts to 32-bit number, then performs bitwise shift on MSB and performs OR operation between it and LSB.
+ *
+ *	@returns 32-bit int uncompensated temperature
+*/
 uint32_t bmp180_read_ut(void)
 {
     uint8_t cmd[2] = {0xF4, 0x2E};
@@ -248,7 +251,13 @@ uint32_t bmp180_read_ut(void)
     return ((uint32_t)data[0]<<8) | data[1];
 }
 
-/* UP (FIXED) */
+/*!
+ *	@brief This method reads an uncompensated pressure value from BMP180 module. Sends two byte command considering OSS (Oversampling Setting) to a 7-bit BMP180 address. Then delays by
+ *			different amount of milliseconds depending on chosen OSS mode. Reads 3 byte response from a module containing MSB, LSB and XLSB. Performs bitwise shift on MSB and LSB and then
+ *			performs logical OR operation between them all and assigns it to a 32-bit integer.
+ *
+ *	@returns 32-bit int uncompensated pressure
+*/
 uint32_t bmp180_read_up(void)
 {
     uint8_t cmd[2];
@@ -280,7 +289,16 @@ uint32_t bmp180_read_up(void)
     return up;
 }
 
-/* FULL COMPENSATION (LibDriver style) */
+/*!
+ *	@brief This method calculates compensated pressure in Pa. Calculates temperature coefficient b5, compensation of physical phenomenons and base pressure b. Lastly calculates correction
+ *			curve.
+ *
+ *	@param ut 32-bit integer value of uncompensated temperature
+ *
+ *	@param up 32-bit integer value of uncompensated pressure
+ *
+ *	@returns 32-bit int pressure in Pa
+*/
 int32_t bmp180_get_pressure_pa_fixed(uint32_t ut, uint32_t up)
 {
     int32_t x1, x2, b5, b6, x3, b3, p;
@@ -317,7 +335,11 @@ int32_t bmp180_get_pressure_pa_fixed(uint32_t ut, uint32_t up)
     return p + ((x1 + x2 + 3791) >> 4);
 }
 
-/* optional: one-call */
+/*!
+ *	@brief This method implements methods responsible for reading uncompensated temperature and pressure and then parses them into method that calculates pressure value in Pa and returns it.
+ *
+ *	@returns 32-bit int pressure in Pa
+*/
 int32_t bmp180_read_pressure_pa(void)
 {
     uint32_t ut = bmp180_read_ut();
@@ -389,7 +411,9 @@ uint16_t read_airquality_raw(){
 	return ((uint16_t)buf[0] << 8) | buf[1];
 }
 
-/* rendering screens */
+/*!
+ * 	@brief Function that renders main screen of weather station.
+*/
 void draw_main_screen() {
 	oled_clearScreen(OLED_COLOR_BLACK);
 	oled_putString(1,1, (uint8_t*) "Stacja Pogodowa", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
@@ -398,12 +422,18 @@ void draw_main_screen() {
 	oled_putString(1,31, (uint8_t*) "Jakub Malinowski", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
 	oled_putString(1,51, (uint8_t*) "<--", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-//	oled_putString(69, 51, (uint8_t*)"-->", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 }
 
+/*!
+ * 	@brief Function that renders screen with temperature, pressure and light intensity readings.
+ *
+ *	@param temp 32-bit temperature value in Celsius
+ *
+ *	@param pressure 32-bit pressure reading in Pa
+ *
+ *	@param lux 32-bit light intensity value in Lux
+*/
 void draw_temp_pressure_screen(int32_t temp, int32_t pressure, int32_t lux) {
-	//oled_clearScreen(OLED_COLOR_BLACK);
-
 	oled_putString(1,1,  (uint8_t*)"Pomiary glowne: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
 	oled_putString(1,21, (uint8_t*)"Temp(C): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
@@ -420,12 +450,16 @@ void draw_temp_pressure_screen(int32_t temp, int32_t pressure, int32_t lux) {
 	oled_putString((1 + 9*6), 41, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
 	oled_putString(1,51, (uint8_t*) "<--", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-//	oled_putString(69, 51, (uint8_t*)"-->", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 }
 
+/*!
+ * 	@brief Function that renders VOC index and humidity readings.
+ *
+ *	@param voc 32-bit VOC index
+ *
+ *	@param humidity 32-bit humidity value in %
+*/
 void draw_air_screen(int32_t voc, int32_t humidity) {
-	//oled_clearScreen(OLED_COLOR_BLACK);
-
 	oled_putString(1,1,  (uint8_t*)"Powietrze ===", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 	oled_putString(1,21,  (uint8_t*)"VOC: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 	oled_putString(1,31,  (uint8_t*)"Humi(%): ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
@@ -437,12 +471,14 @@ void draw_air_screen(int32_t voc, int32_t humidity) {
 	oled_putString((1 + 9*6), 31, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
 	oled_putString(1,51, (uint8_t*) "<--", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-//	oled_putString(69, 51, (uint8_t*)"-->", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 }
 
+/*!
+ * 	@brief Function that renders magnetic field reading.
+ *
+ *	@param b 32-bit magnetic field value
+*/
 void draw_magnetic_screen(int32_t b) {
-    //oled_clearScreen(OLED_COLOR_BLACK);
-
     oled_putString(1,1,  (uint8_t*)"=== Magnetometr ===", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
     oled_putString(1, 21, (uint8_t*)"Gauss: ", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
@@ -450,9 +486,25 @@ void draw_magnetic_screen(int32_t b) {
     oled_putString((1 + 9*6), 21, buf, OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 
     oled_putString(1,  51, (uint8_t*)"<--", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
-//    oled_putString(69, 51, (uint8_t*)"-->", OLED_COLOR_WHITE, OLED_COLOR_BLACK);
 }
 
+/*!
+ * 	@brief Function that is responsible for redrawing screen whether the value of the reading has been changed.
+ *
+ *	@param t 32-bit integer temperature reading in Celsius
+ *
+ *	@param humidity 32-bit integer humidity value in %
+ *
+ *	@param light 32-bit integer light intensity value in Lux
+ *
+ *	@param pressure 32-bit integer pressure value in Pa
+ *
+ *	@param voc 32-bit VOC index value
+ *
+ *	@param b 32-bit magnetic field value in Gauss
+ *
+ *	@param full_redraw 8-bit integer 1 or 0 responsible for representing booleans
+*/
 static void redraw_current_screen(int32_t t, int32_t humidity, int32_t light,
                                    int32_t pressure, int32_t voc, int32_t b,
                                    uint8_t full_redraw) {
